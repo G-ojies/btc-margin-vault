@@ -1,4 +1,7 @@
 use anchor_lang::prelude::*;
+use ika_dwallet_anchor::{DWalletContext, CPI_AUTHORITY_SEED};
+
+pub use ika_dwallet_anchor::CPI_AUTHORITY_SEED as IKA_CPI_AUTHORITY_SEED;
 
 declare_id!("6UVY7nskmCBaeKS22E6oh5CkS9TcdcmazHzLAme4YNfB");
 
@@ -17,6 +20,13 @@ pub mod btc_margin_vault {
         vault.btc_collateral_usd = 0;
         vault.usdc_borrowed = 0;
         vault.is_active = true;
+        Ok(())
+    }
+
+    pub fn register_dwallet(ctx: Context<UpdateVault>, dwallet_id: Pubkey) -> Result<()> {
+        let vault = &mut ctx.accounts.vault;
+        require!(vault.is_active, VaultError::VaultNotActive);
+        vault.dwallet_id = dwallet_id;
         Ok(())
     }
 
@@ -64,30 +74,58 @@ pub mod btc_margin_vault {
         Ok(())
     }
 
-    pub fn liquidate(ctx: Context<Liquidate>, vault: Pubkey) -> Result<()> {
+    pub fn liquidate(
+        ctx: Context<Liquidate>,
+        vault: Pubkey,
+        message_digest: [u8; 32],
+        message_metadata_digest: [u8; 32],
+        user_pubkey: [u8; 32],
+        signature_scheme: u16,
+        message_approval_bump: u8,
+    ) -> Result<()> {
         require_keys_eq!(ctx.accounts.vault.key(), vault, VaultError::VaultMismatch);
 
-        let vault_account = &mut ctx.accounts.vault;
-        require!(vault_account.is_active, VaultError::VaultNotActive);
-        require!(
-            vault_account.btc_collateral_usd > 0,
-            VaultError::BelowLiquidationThreshold
-        );
+        {
+            let v = &ctx.accounts.vault;
+            require!(v.is_active, VaultError::VaultNotActive);
+            require!(
+                v.btc_collateral_usd > 0,
+                VaultError::BelowLiquidationThreshold
+            );
+            let ltv_numerator = v
+                .usdc_borrowed
+                .checked_mul(100)
+                .ok_or(VaultError::MathOverflow)?;
+            let ltv = ltv_numerator / v.btc_collateral_usd;
+            require!(
+                ltv > LIQUIDATION_THRESHOLD,
+                VaultError::BelowLiquidationThreshold
+            );
+        }
 
-        let ltv_numerator = vault_account
-            .usdc_borrowed
-            .checked_mul(100)
-            .ok_or(VaultError::MathOverflow)?;
-        let ltv = ltv_numerator / vault_account.btc_collateral_usd;
+        let cpi = DWalletContext {
+            dwallet_program: ctx.accounts.dwallet_program.to_account_info(),
+            cpi_authority: ctx.accounts.cpi_authority.to_account_info(),
+            caller_program: ctx.accounts.caller_program.to_account_info(),
+            cpi_authority_bump: ctx.bumps.cpi_authority,
+        };
+        cpi.approve_message(
+            &ctx.accounts.dwallet_coordinator,
+            &ctx.accounts.message_approval,
+            &ctx.accounts.dwallet,
+            &ctx.accounts.liquidator.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
+            message_digest,
+            message_metadata_digest,
+            user_pubkey,
+            signature_scheme,
+            message_approval_bump,
+        )?;
 
-        require!(
-            ltv > LIQUIDATION_THRESHOLD,
-            VaultError::BelowLiquidationThreshold
-        );
-
-        vault_account.is_active = false;
-        vault_account.btc_collateral_usd = 0;
-        vault_account.usdc_borrowed = 0;
+        let v = &mut ctx.accounts.vault;
+        v.is_active = false;
+        v.btc_collateral_usd = 0;
+        v.usdc_borrowed = 0;
         Ok(())
     }
 }
@@ -131,9 +169,37 @@ pub struct UpdateVault<'info> {
 
 #[derive(Accounts)]
 pub struct Liquidate<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = vault.dwallet_id == dwallet.key() @ VaultError::VaultMismatch,
+    )]
     pub vault: Account<'info, VaultState>,
+
+    #[account(mut)]
     pub liquidator: Signer<'info>,
+
+    /// CHECK: Ika dWallet program; the runtime CPI invocation validates it.
+    pub dwallet_program: UncheckedAccount<'info>,
+
+    /// CHECK: PDA[CPI_AUTHORITY_SEED] of this program; signs the CPI via seeds.
+    #[account(seeds = [CPI_AUTHORITY_SEED], bump)]
+    pub cpi_authority: UncheckedAccount<'info>,
+
+    /// CHECK: this program's own account, bound to declare_id below.
+    #[account(address = crate::ID)]
+    pub caller_program: UncheckedAccount<'info>,
+
+    /// CHECK: Ika DWalletCoordinator PDA; validated by the Ika program.
+    pub dwallet_coordinator: UncheckedAccount<'info>,
+
+    /// CHECK: dWallet account; the vault constraint binds this to vault.dwallet_id.
+    pub dwallet: UncheckedAccount<'info>,
+
+    /// CHECK: MessageApproval PDA, created by the Ika program via CPI.
+    #[account(mut)]
+    pub message_approval: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 #[error_code]

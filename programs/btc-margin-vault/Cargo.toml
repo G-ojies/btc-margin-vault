@@ -23,6 +23,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "1.0.1"
+ika-dwallet-anchor = { git = "https://github.com/dwallet-labs/ika-pre-alpha", rev = "3bd7945e012950e54fb4d0057b72a7d466556fc1" }
 
 [dev-dependencies]
 litesvm = "0.10.0"
