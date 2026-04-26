@@ -1,21 +1,21 @@
 # BTC Margin Vault
 
-**Borrow USDC against native Bitcoin collateral on Solana — no bridges, no wBTC.**
+**Borrow USDC against native Bitcoin collateral on Solana - No bridges, No wBTC.**
 
-A Solana Anchor program that lets a user lock real, native BTC as collateral and borrow USDC against it, with an Ika dWallet acting as the cryptographic owner of the on-Bitcoin UTXO. Liquidation flows authorize the dWallet — via on-chain CPI — to release that BTC back into the protocol's possession, all without ever wrapping or bridging the asset.
+A Solana Anchor program that lets a user lock real, native BTC as collateral and borrow USDC against it, with an Ika dWallet acting as the cryptographic owner of the on-Bitcoin UTXO. Liquidation flows authorize the dWallet via on-chain CPI to release that BTC back into the protocol's possession, all without ever wrapping or bridging the asset.
 
 ## Problem
 
 Solana DeFi treats Bitcoin as a second-class citizen. Every BTC-collateralized position today is either:
 
-- **A wrapped IOU** (wBTC, tBTC, sBTC) — the user trusts a custodian or a bridge, and a bridge exploit zeros the position.
-- **A bridge-LP claim** — the user owns a synthetic that drifts from BTC under stress, and reconciliation depends on liveness of the bridge.
+- **A wrapped IOU** (wBTC, tBTC, sBTC):  the user trusts a custodian or a bridge, and a bridge exploit zeros the position.
+- **A bridge-LP claim**: the user owns a synthetic that drifts from BTC under stress, and reconciliation depends on liveness of the bridge.
 
 Native BTC has no smart-contract layer, so there has been no way to write a Solana program that *directly* controls a Bitcoin UTXO. Margin and lending against BTC therefore live behind a wrapper, and the wrapper is the weakest link.
 
 ## Solution
 
-BTC Margin Vault uses Ika's dWallet primitive as the on-chain handle to a real Bitcoin address. A dWallet is a programmable, transferable account whose signing authority is shared between the user and the Ika MPC network via 2PC-MPC — meaning a Solana program can *authorize* a Bitcoin signature without ever holding the private key, and without anyone ever holding the full key.
+BTC Margin Vault uses Ika's dWallet primitive as the on-chain handle to a real Bitcoin address. A dWallet is a programmable, transferable account whose signing authority is shared between the user and the Ika MPC network via 2PC-MPC - meaning a Solana program can *authorize* a Bitcoin signature without ever holding the private key, and without anyone ever holding the full key.
 
 The vault flow:
 
